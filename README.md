@@ -2,22 +2,21 @@
 
 [English](README.md) | [Русский](README.ru.md)
 
-> Experimental privacy-focused screen capture modifications for OBS Studio on macOS, built using Apple's ScreenCaptureKit.
+> An experimental privacy-focused modification of OBS Studio for macOS, built using Apple's ScreenCaptureKit.
 
-## Overview
+**OBS macOS Capture Filter** is a proof-of-concept project that modifies OBS Studio's native `mac-capture` plugin to exclude selected applications from screen recordings.
 
-OBS macOS Capture Filter is an experimental modification of OBS Studio's native `mac-capture` plugin.
-The project explores application-level filtering during screen recording on macOS, allowing selected applications to remain visible on the user's display while being excluded from the captured video.
+The excluded applications remain visible on the actual macOS desktop while their windows are omitted from the captured video.
 
-It also introduces screenshot-aware capture behavior to prevent the macOS screenshot selection interface from appearing in recordings.
+The project also explores screenshot-aware capture behavior to prevent the macOS screenshot selection interface from appearing normally in recordings.
 
-The implementation is based on **OBS Studio 32.0.4**.
+**Based on OBS Studio 32.0.4.**
 
 ## Features
 
 ### Application Exclusion
 
-Selected applications can be excluded from screen recordings using Apple's ScreenCaptureKit API.
+The modification uses Apple's ScreenCaptureKit framework to exclude applications from screen recordings based on their bundle identifiers.
 
 The following applications have been successfully tested:
 
@@ -26,46 +25,33 @@ The following applications have been successfully tested:
 | ChatGPT Classic | `com.openai.chat` | Working |
 | AdGuard VPN | `com.adguard.mac.vpn` | Working |
 
-Excluded applications remain visible on the actual macOS desktop but do not appear as normal application windows in the OBS recording.
-
-Application identifiers are currently hardcoded in the source code.
+Applications are currently specified directly in the source code.
 
 ### Screenshot-Aware Capture
 
-The modification also includes experimental handling of the macOS screenshot shortcut:
+The project includes experimental handling of the macOS screenshot shortcut:
 
 `Command + Shift + 4`
 
 When the screenshot selection interface is activated, the captured image temporarily freezes.
 
-This prevents the screenshot selection process from being displayed normally in the recording.
-
-**Note:** This behavior is experimental and may affect capture smoothness.
+This behavior prevents the screenshot selection process from appearing normally in the recording.
 
 ### Native OBS Integration
 
-The implementation modifies OBS Studio's existing macOS capture plugin rather than relying on an external screen-recording application.
+The implementation modifies the existing OBS Studio `mac-capture` plugin.
 
-Technologies involved include:
-
-- Objective-C
-- C
-- Apple ScreenCaptureKit
-- Core Graphics
-- OBS Studio
-- CMake
+It does not require a separate screen-recording application or an external automation script.
 
 ## How It Works
 
 OBS Studio uses Apple's ScreenCaptureKit framework to capture screen content on macOS.
 
-This project modifies the configuration of `SCContentFilter` within the native `mac-capture` plugin.
+This project modifies the native capture implementation by configuring `SCContentFilter` to exclude selected applications.
 
-The filter is configured to exclude selected applications based on their bundle identifiers.
+Additional logic monitors screenshot-related activity and temporarily changes capture behavior when the macOS screenshot selection interface is active.
 
-Additional logic monitors screenshot-related activity and temporarily changes capture behavior while the macOS screenshot interface is active.
-
-The modifications are concentrated in three OBS Studio source files:
+The patch modifies three source files:
 
 ```text
 plugins/mac-capture/mac-sck-common.h
@@ -73,49 +59,102 @@ plugins/mac-capture/mac-sck-common.m
 plugins/mac-capture/mac-sck-video-capture.m
 ```
 
+The implementation involves:
+
+- Objective-C and C
+- Apple ScreenCaptureKit
+- Core Graphics
+- macOS system APIs
+- CMake and Xcode
+- OBS Studio internals
+
+## Project Structure
+
+```text
+obs-macos-capture-filter/
+├── README.md
+├── README.ru.md
+├── LICENSE
+├── patches/
+│   └── obs-32.0.4-macos-capture.patch
+└── docs/
+    ├── build.md
+    └── build.ru.md
+```
+
+## Build and Installation
+
+The project provides a source patch targeting **OBS Studio 32.0.4**.
+
+The patch has been checked against the original OBS source files using Git.
+
+A complete clean-build reproduction has not yet been verified.
+
+### Documentation
+
+- [Build instructions (English)](docs/build.md)
+- [Инструкция по сборке (Русский)](docs/build.ru.md)
+
+### Source Patch
+
+- [OBS Studio 32.0.4 macOS capture patch](patches/obs-32.0.4-macos-capture.patch)
+
+**Important:** Replacing components inside an existing OBS Studio installation may affect code signing, application updates, permissions, or other functionality.
+
+## Verified Behavior
+
+The following results were observed in the developer's environment:
+
+| Feature | Result |
+|---|---|
+| ChatGPT Classic exclusion | Working |
+| AdGuard VPN exclusion | Working |
+| Screenshot selection (`Command + Shift + 4`) | Temporary capture freezing |
+| macOS Dock exclusion | Not working |
+
+These results describe the tested environment and do not guarantee identical behavior on other systems.
+
 ## Known Limitations
 
-This project is an experimental modification, not a complete privacy or security solution.
+This project is experimental and is not intended to provide complete privacy protection.
 
-- **Dock visibility:** The macOS Dock remains visible in recordings, even when exclusion of its application identifier is attempted.
-- **Hardcoded exclusions:** Application identifiers must currently be changed in the source code.
-- **Screenshot freezing:** The recording temporarily freezes during screenshot selection.
-- **Compatibility:** The implementation is based on OBS Studio 32.0.4. Compatibility with other OBS Studio and macOS versions has not been verified.
-- **Privacy limitations:** The modification does not guarantee that all system UI elements, notifications, application indicators, or sensitive information will be hidden.
+- **Dock visibility:** The macOS Dock remains visible in recordings, even when exclusion is attempted.
+- **Hardcoded application list:** Changing the excluded applications currently requires modifying the source code.
+- **Screenshot freezing:** Capture temporarily freezes during screenshot selection.
+- **Version compatibility:** The patch targets OBS Studio 32.0.4. Other versions have not been verified.
+- **System UI:** Some system elements, notifications, application indicators, or sensitive information may still appear in recordings.
+- **Installation:** A general-purpose installer is not provided.
 
-Always verify the recorded output before relying on application exclusion.
+Always review recorded output before relying on application exclusion.
+
+## Demonstration
+
+A demonstration video is planned.
+
+It will show:
+
+1. Application exclusion during screen recording.
+2. Screenshot-aware capture behavior.
+3. Known limitations, including Dock visibility.
 
 ## Project Status
 
 **Experimental / Proof of Concept**
 
-Confirmed behavior in the developer's environment:
+The project was created as an independent technical experiment exploring native macOS screen capture APIs and modifications to OBS Studio.
 
-- ChatGPT Classic is excluded from recordings.
-- AdGuard VPN is excluded from recordings.
-- Screenshot selection triggers temporary capture freezing.
-- The macOS Dock remains visible.
-
-The project is intended for experimentation, technical learning, and exploration of macOS screen capture APIs.
-
-## Installation and Build
-
-Build and installation instructions will be added after the source patch and reproducibility checks are completed.
-
-The project is based on the OBS Studio 32.0.4 source code.
-
-## Demo
-
-A demonstration video showing application exclusion, screenshot-aware capture behavior, and known limitations is planned.
-
-## Upstream Project
-
-This project is based on the open-source [OBS Studio](https://github.com/obsproject/obs-studio).
-
-OBS Studio is developed by the OBS Project and its contributors.
-
-This repository is an independent experimental modification and is not affiliated with or officially supported by the OBS Project.
+Future improvements may include configurable application exclusions, additional compatibility testing, and simplified installation.
 
 ## License
 
-Licensing information for the OBS-derived modifications will be added before the source patch is published.
+This repository contains modifications to OBS Studio, which is distributed under the GNU General Public License.
+
+The full text of **GNU GPL version 2** is included in the [LICENSE](LICENSE) file.
+
+Original copyright and licensing notices from OBS Studio and its contributors remain applicable.
+
+## Acknowledgments
+
+This project is based on [OBS Studio](https://github.com/obsproject/obs-studio), developed by the OBS Project and its contributors.
+
+This repository is an independent experimental modification and is not affiliated with or officially supported by the OBS Project.
