@@ -1,0 +1,614 @@
+diff --git a/plugins/mac-capture/mac-sck-common.h b/plugins/mac-capture/mac-sck-common.h
+index 9c9ee08..a48ed28 100644
+--- a/plugins/mac-capture/mac-sck-common.h
++++ b/plugins/mac-capture/mac-sck-common.h
+@@ -46,6 +46,9 @@ struct API_AVAILABLE(macos(12.5)) screen_capture {
+     bool show_hidden_windows;
+     bool show_empty_names;
+     bool audio_only;
++    bool screenshot_cursor_hidden;
++    bool screenshot_session_active;
++    bool screenshot_content_filter_updated;
+ 
+     SCStream *disp;
+     SCStreamConfiguration *stream_properties;
+@@ -56,6 +59,11 @@ struct API_AVAILABLE(macos(12.5)) screen_capture {
+     os_sem_t *shareable_content_available;
+     IOSurfaceRef current, prev;
+     bool capture_failed;
++    bool screenshot_filter_active;
++    float screenshot_hotkey_grace;
++
++    CFMachPortRef screenshot_event_tap;
++    CFRunLoopSourceRef screenshot_event_source;
+ 
+     pthread_mutex_t mutex;
+ 
+diff --git a/plugins/mac-capture/mac-sck-common.m b/plugins/mac-capture/mac-sck-common.m
+index 67e4881..e9d377c 100644
+--- a/plugins/mac-capture/mac-sck-common.m
++++ b/plugins/mac-capture/mac-sck-common.m
+@@ -200,6 +200,16 @@ bool build_application_list(struct screen_capture *sc, obs_properties_t *props)
+ 
+ API_AVAILABLE(macos(12.5)) void screen_stream_video_update(struct screen_capture *sc, CMSampleBufferRef sample_buffer)
+ {
++    bool freeze_frame = false;
++
++    if (!pthread_mutex_lock(&sc->mutex)) {
++        freeze_frame = sc->screenshot_filter_active;
++        pthread_mutex_unlock(&sc->mutex);
++    }
++
++    if (freeze_frame)
++        return;
++
+     bool frame_detail_errored = false;
+     float scale_factor = 1.0f;
+     CGRect window_rect = {};
+diff --git a/plugins/mac-capture/mac-sck-video-capture.m b/plugins/mac-capture/mac-sck-video-capture.m
+index 258dd34..5d21fdf 100644
+--- a/plugins/mac-capture/mac-sck-video-capture.m
++++ b/plugins/mac-capture/mac-sck-video-capture.m
+@@ -1,8 +1,370 @@
+ #include "mac-sck-common.h"
+ #include "window-utils.h"
+ 
++API_AVAILABLE(macos(12.5)) static bool screenshot_ui_is_visible(void)
++{
++    CFArrayRef window_info =
++        CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly,
++                                   kCGNullWindowID);
++
++    if (!window_info)
++        return false;
++
++    bool found = false;
++
++    for (NSDictionary *window in (NSArray *) window_info) {
++        /*
++         * 1. Основное окно Screenshot.app
++         */
++        NSNumber *pid_number =
++            [window objectForKey:(id) kCGWindowOwnerPID];
++
++        if (pid_number) {
++            pid_t pid = (pid_t) [pid_number intValue];
++
++            NSRunningApplication *app =
++                [NSRunningApplication
++                    runningApplicationWithProcessIdentifier:pid];
++
++            if ([[app bundleIdentifier]
++                    isEqualToString:@"com.apple.screencaptureui"]) {
++                found = true;
++                break;
++            }
++        }
++
++        /*
++         * 2. Служебные окна выделения Cmd+Shift+4.
++         * Они появляются очень рано — ещё до основного Screenshot UI.
++         */
++        NSString *name =
++            [window objectForKey:(id) kCGWindowName];
++
++        NSNumber *layer_number =
++            [window objectForKey:(id) kCGWindowLayer];
++
++        if ([name isEqualToString:@"tracking"] &&
++            layer_number &&
++            [layer_number intValue] == 2147483631) {
++            found = true;
++            break;
++        }
++    }
++
++    CFRelease(window_info);
++    return found;
++}
++
++
++API_AVAILABLE(macos(12.5)) static CGEventRef screenshot_hotkey_callback(CGEventTapProxy proxy,
++                                             CGEventType type,
++                                             CGEventRef event,
++                                             void *refcon)
++{
++    (void) proxy;
++
++    if (type != kCGEventKeyDown)
++        return event;
++
++    struct screen_capture *sc = refcon;
++    if (!sc)
++        return event;
++
++    CGKeyCode keycode =
++        (CGKeyCode) CGEventGetIntegerValueField(
++            event, kCGKeyboardEventKeycode);
++
++    CGEventFlags flags = CGEventGetFlags(event);
++
++    /*
++     * Physical "4" key on a Mac keyboard = keycode 21.
++     * This is a listen-only event tap: the shortcut itself is
++     * not swallowed or modified.
++     */
++    bool command_shift_4 =
++        keycode == 21 &&
++        (flags & kCGEventFlagMaskCommand) &&
++        (flags & kCGEventFlagMaskShift);
++
++    if (!command_shift_4)
++    return event;
++
++/*
++ * Hide the captured cursor immediately on keyDown.
++ * This happens before macOS changes the local pointer to the
++ * Screenshot crosshair.
++ */
++if (!pthread_mutex_lock(&sc->mutex)) {
++    sc->screenshot_filter_active = true;
++    sc->screenshot_hotkey_grace = 0.12f;
++    sc->screenshot_cursor_hidden = true;
++        sc->screenshot_session_active = true;
++
++    pthread_mutex_unlock(&sc->mutex);
++}
++
++if (sc->disp && sc->stream_properties.showsCursor) {
++    sc->stream_properties.showsCursor = NO;
++
++    [sc->disp
++        updateConfiguration:sc->stream_properties
++        completionHandler:^(NSError *_Nullable error) {
++            if (error) {
++                MACCAP_ERR(
++                    "Immediate Screenshot cursor hide failed: %s\n",
++                    [[error localizedFailureReason]
++                        cStringUsingEncoding:NSUTF8StringEncoding]);
++            }
++        }];
++}
++
++    MACCAP_LOG(LOG_INFO,
++               "Screenshot frame freeze: hotkey detected\n");
++
++    return event;
++}
++
++API_AVAILABLE(macos(12.5)) static void install_screenshot_hotkey_monitor(struct screen_capture *sc)
++{
++    if (sc->capture_type != ScreenCaptureDisplayStream)
++        return;
++
++    CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);
++
++    sc->screenshot_event_tap =
++        CGEventTapCreate(kCGSessionEventTap,
++                         kCGHeadInsertEventTap,
++                         kCGEventTapOptionListenOnly,
++                         mask,
++                         screenshot_hotkey_callback,
++                         sc);
++
++    if (!sc->screenshot_event_tap) {
++        MACCAP_LOG(LOG_WARNING,
++                   "Could not create Screenshot hotkey event tap\n");
++        return;
++    }
++
++    sc->screenshot_event_source =
++        CFMachPortCreateRunLoopSource(
++            kCFAllocatorDefault,
++            sc->screenshot_event_tap,
++            0);
++
++    if (!sc->screenshot_event_source) {
++        CFMachPortInvalidate(sc->screenshot_event_tap);
++        CFRelease(sc->screenshot_event_tap);
++        sc->screenshot_event_tap = NULL;
++        return;
++    }
++
++    CFRunLoopAddSource(CFRunLoopGetMain(),
++                       sc->screenshot_event_source,
++                       kCFRunLoopCommonModes);
++
++    CGEventTapEnable(sc->screenshot_event_tap, true);
++
++    MACCAP_LOG(LOG_INFO,
++               "Screenshot hotkey monitor installed\n");
++}
++
++API_AVAILABLE(macos(12.5)) static void destroy_screenshot_hotkey_monitor(struct screen_capture *sc)
++{
++    if (sc->screenshot_event_source) {
++        CFRunLoopRemoveSource(CFRunLoopGetMain(),
++                              sc->screenshot_event_source,
++                              kCFRunLoopCommonModes);
++
++        CFRelease(sc->screenshot_event_source);
++        sc->screenshot_event_source = NULL;
++    }
++
++    if (sc->screenshot_event_tap) {
++        CGEventTapEnable(sc->screenshot_event_tap, false);
++        CFMachPortInvalidate(sc->screenshot_event_tap);
++        CFRelease(sc->screenshot_event_tap);
++        sc->screenshot_event_tap = NULL;
++    }
++}
++
++
++API_AVAILABLE(macos(12.5)) static void restore_normal_content_filter(struct screen_capture *sc)
++{
++    if (!sc || !sc->disp ||
++        sc->capture_type != ScreenCaptureDisplayStream)
++        return;
++
++    [SCShareableContent
++        getShareableContentExcludingDesktopWindows:NO
++        onScreenWindowsOnly:NO
++        completionHandler:^(SCShareableContent *_Nullable content,
++                            NSError *_Nullable error) {
++
++            if (error || !content || !sc->disp)
++                return;
++
++            SCDisplay *target_display = nil;
++
++            for (SCDisplay *display in content.displays) {
++                if (display.displayID == sc->display) {
++                    target_display = display;
++                    break;
++                }
++            }
++
++            if (!target_display)
++                return;
++
++            NSMutableArray *exclusions =
++                [[NSMutableArray alloc] init];
++
++            NSString *mainBundleIdentifier =
++                [[NSBundle mainBundle] bundleIdentifier];
++
++            for (SCRunningApplication *app in content.applications) {
++                BOOL shouldExclude =
++                    [app.bundleIdentifier isEqualToString:@"com.openai.chat"] ||
++                    [app.bundleIdentifier isEqualToString:@"com.adguard.mac.vpn"] ||
++                    [app.bundleIdentifier isEqualToString:@"pro.betterdisplay.BetterDisplay"] ||
++                    [app.bundleIdentifier isEqualToString:@"com.apple.dock"] ||
++                    [app.bundleIdentifier isEqualToString:@"com.apple.screencaptureui"];
++
++                if (sc->hide_obs &&
++                    [app.bundleIdentifier isEqualToString:mainBundleIdentifier]) {
++                    shouldExclude = YES;
++                }
++
++                if (shouldExclude)
++                    [exclusions addObject:app];
++            }
++
++            NSArray *empty = [[NSArray alloc] init];
++
++            SCContentFilter *filter =
++                [[SCContentFilter alloc]
++                    initWithDisplay:target_display
++                    excludingApplications:exclusions
++                    exceptingWindows:empty];
++
++            [sc->disp
++                updateContentFilter:filter
++                completionHandler:^(NSError *_Nullable updateError) {
++                    if (!updateError) {
++                        MACCAP_LOG(
++                            LOG_INFO,
++                            "Normal content filter restored\n");
++                    }
++                }];
++
++            [filter release];
++            [empty release];
++            [exclusions release];
++        }];
++}
++
++API_AVAILABLE(macos(12.5)) static void refresh_screenshot_content_filter(struct screen_capture *sc)
++{
++    if (!sc || !sc->disp ||
++        sc->capture_type != ScreenCaptureDisplayStream)
++        return;
++
++    [SCShareableContent
++        getShareableContentExcludingDesktopWindows:NO
++        onScreenWindowsOnly:NO
++        completionHandler:^(SCShareableContent *_Nullable content,
++                            NSError *_Nullable error) {
++
++            if (error || !content || !sc->disp) {
++                if (error) {
++                    MACCAP_ERR(
++                        "Screenshot inclusion content query failed: %s\n",
++                        [[error localizedFailureReason]
++                            cStringUsingEncoding:NSUTF8StringEncoding]);
++                }
++                return;
++            }
++
++            SCDisplay *target_display = nil;
++
++            for (SCDisplay *display in content.displays) {
++                if (display.displayID == sc->display) {
++                    target_display = display;
++                    break;
++                }
++            }
++
++            if (!target_display)
++                return;
++
++            /*
++             * Important difference:
++             *
++             * Instead of capturing the whole display and trying to
++             * exclude the Screenshot tracking overlay, capture only
++             * windows belonging to allowed applications.
++             *
++             * Ownerless tracking windows therefore do not belong to
++             * the permitted application set.
++             */
++            NSMutableArray *included_apps =
++                [[NSMutableArray alloc] init];
++
++            NSString *mainBundleIdentifier =
++                [[NSBundle mainBundle] bundleIdentifier];
++
++            for (SCRunningApplication *app in content.applications) {
++                NSString *bundle = app.bundleIdentifier;
++
++                BOOL excluded =
++                    [bundle isEqualToString:@"com.openai.chat"] ||
++                    [bundle isEqualToString:@"com.adguard.mac.vpn"] ||
++                    [bundle isEqualToString:@"pro.betterdisplay.BetterDisplay"] ||
++                    [bundle isEqualToString:@"com.apple.dock"] ||
++                    [bundle isEqualToString:@"com.apple.screencaptureui"];
++
++                if (sc->hide_obs &&
++                    [bundle isEqualToString:mainBundleIdentifier]) {
++                    excluded = YES;
++                }
++
++                if (!excluded)
++                    [included_apps addObject:app];
++            }
++
++            NSArray *empty = [[NSArray alloc] init];
++
++            SCContentFilter *filter =
++                [[SCContentFilter alloc]
++                    initWithDisplay:target_display
++                    includingApplications:included_apps
++                    exceptingWindows:empty];
++
++            [sc->disp
++                updateContentFilter:filter
++                completionHandler:^(NSError *_Nullable updateError) {
++
++                    if (updateError) {
++                        MACCAP_ERR(
++                            "Screenshot inclusion filter failed: %s\n",
++                            [[updateError localizedFailureReason]
++                                cStringUsingEncoding:NSUTF8StringEncoding]);
++                    } else {
++                        MACCAP_LOG(
++                            LOG_INFO,
++                            "Screenshot inclusion filter active\n");
++                    }
++                }];
++
++            [filter release];
++            [empty release];
++            [included_apps release];
++        }];
++}
++
+ API_AVAILABLE(macos(12.5)) static void destroy_screen_stream(struct screen_capture *sc)
+ {
++    destroy_screenshot_hotkey_monitor(sc);
++
+     if (sc->disp && !sc->capture_failed) {
+         [sc->disp stopCaptureWithCompletionHandler:^(NSError *_Nullable error) {
+             if (error && error.code != SCStreamErrorAttemptToStopStreamState) {
+@@ -110,26 +472,36 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture
+                 os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
+                 return true;
+             }
+-            if (sc->hide_obs) {
+-                SCRunningApplication *obsApp = nil;
++            {
++                NSMutableArray *exclusions = [[NSMutableArray alloc] init];
+                 NSString *mainBundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
++
+                 for (SCRunningApplication *app in sc->shareable_content.applications) {
+-                    if ([app.bundleIdentifier isEqualToString:mainBundleIdentifier]) {
+-                        obsApp = app;
+-                        break;
++                    BOOL shouldExclude =
++    [app.bundleIdentifier isEqualToString:@"com.openai.chat"] ||
++    [app.bundleIdentifier isEqualToString:@"com.adguard.mac.vpn"] ||
++    [app.bundleIdentifier isEqualToString:@"pro.betterdisplay.BetterDisplay"] ||
++    [app.bundleIdentifier isEqualToString:@"com.apple.dock"] ||
++    [app.bundleIdentifier isEqualToString:@"com.apple.screencaptureui"];
++
++                    if (sc->hide_obs &&
++                        [app.bundleIdentifier isEqualToString:mainBundleIdentifier]) {
++                        shouldExclude = YES;
++                    }
++
++                    if (shouldExclude) {
++                        [exclusions addObject:app];
+                     }
+                 }
+-                NSArray *exclusions = [[NSArray alloc] initWithObjects:obsApp, nil];
++
+                 NSArray *empty = [[NSArray alloc] init];
++
+                 content_filter = [[SCContentFilter alloc] initWithDisplay:target_display
+                                                     excludingApplications:exclusions
+                                                          exceptingWindows:empty];
++
+                 [empty release];
+                 [exclusions release];
+-            } else {
+-                NSArray *empty = [[NSArray alloc] init];
+-                content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:empty];
+-                [empty release];
+             }
+ 
+             set_display_mode(sc, target_display);
+@@ -310,6 +682,8 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
+     if (!init_screen_stream(sc))
+         goto fail;
+ 
++    install_screenshot_hotkey_monitor(sc);
++
+     return sc;
+ 
+ fail:
+@@ -321,6 +695,135 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_tick(void *data, float
+ {
+     struct screen_capture *sc = data;
+ 
++    if (sc->capture_type == ScreenCaptureDisplayStream && sc->disp) {
++        bool screenshot_ui_active = screenshot_ui_is_visible();
++
++        if (screenshot_ui_active &&
++            !sc->screenshot_content_filter_updated) {
++
++            sc->screenshot_content_filter_updated = true;
++            refresh_screenshot_content_filter(sc);
++
++        } else if (!screenshot_ui_active &&
++                   sc->screenshot_content_filter_updated) {
++
++            sc->screenshot_content_filter_updated = false;
++
++            if (!pthread_mutex_lock(&sc->mutex)) {
++                sc->screenshot_session_active = false;
++                pthread_mutex_unlock(&sc->mutex);
++            }
++
++            restore_normal_content_filter(sc);
++        }
++
++        bool effective_active = false;
++        bool changed = false;
++
++        if (!pthread_mutex_lock(&sc->mutex)) {
++            bool previous_active = sc->screenshot_filter_active;
++
++            /*
++             * Freeze only during the very short transition immediately
++             * after Cmd+Shift+4. Once Screenshot UI is actually visible,
++             * resume live video and hide only the captured cursor.
++             */
++            if (sc->screenshot_hotkey_grace > 0.0f) {
++                sc->screenshot_hotkey_grace -= seconds;
++
++                if (sc->screenshot_hotkey_grace < 0.0f)
++                    sc->screenshot_hotkey_grace = 0.0f;
++
++                sc->screenshot_filter_active = true;
++            } else {
++                sc->screenshot_filter_active = false;
++            }
++
++            effective_active = sc->screenshot_filter_active;
++            changed = previous_active != effective_active;
++
++            pthread_mutex_unlock(&sc->mutex);
++        }
++
++        /*
++         * Keep the display capture live while Screenshot UI is active,
++         * but do not composite the Screenshot crosshair cursor into
++         * the ScreenCaptureKit stream.
++         */
++        bool cursor_state_changed = false;
++
++        if (!pthread_mutex_lock(&sc->mutex)) {
++            /*
++             * Keep the captured cursor hidden not only while Screenshot UI
++             * is visible, but also during the hotkey grace period before
++             * Screenshot UI has appeared.
++             */
++            bool want_cursor_hidden = sc->screenshot_session_active;
++
++            if (sc->screenshot_cursor_hidden != want_cursor_hidden) {
++                sc->screenshot_cursor_hidden = want_cursor_hidden;
++                cursor_state_changed = true;
++            }
++
++            pthread_mutex_unlock(&sc->mutex);
++        }
++
++        if (cursor_state_changed) {
++            BOOL show_cursor = sc->screenshot_session_active ? NO : YES;
++
++            if (sc->stream_properties.showsCursor != show_cursor) {
++                sc->stream_properties.showsCursor = show_cursor;
++
++                [sc->disp
++                    updateConfiguration:sc->stream_properties
++                    completionHandler:^(NSError *_Nullable error) {
++                        if (error) {
++                            MACCAP_ERR(
++                                "Screenshot cursor update failed: %s\\n",
++                                [[error localizedFailureReason]
++                                    cStringUsingEncoding:NSUTF8StringEncoding]);
++                        }
++                    }];
++            }
++
++            MACCAP_LOG(LOG_INFO,
++                       "Screenshot cursor in capture: %s\\n",
++                       show_cursor ? "visible" : "hidden");
++        }
++
++        if (changed) {
++            MACCAP_LOG(LOG_INFO,
++                       "Screenshot frame freeze: %s\n",
++                       effective_active ? "active" : "inactive");
++
++            /*
++             * Screenshot UI may already have changed the cursor before
++             * our detector fires.  In that case sc->current can contain
++             * the first frame with the crosshair.
++             *
++             * Discard that pending frame and keep sc->prev untouched.
++             * sc->prev is the last frame that OBS actually displayed,
++             * i.e. the frame from before Screenshot UI appeared.
++             */
++            if (effective_active) {
++                IOSurfaceRef unsafe_current = NULL;
++
++                if (!pthread_mutex_lock(&sc->mutex)) {
++                    unsafe_current = sc->current;
++                    sc->current = NULL;
++                    pthread_mutex_unlock(&sc->mutex);
++                }
++
++                if (unsafe_current) {
++                    IOSurfaceDecrementUseCount(unsafe_current);
++                    CFRelease(unsafe_current);
++                }
++
++                return;
++            }
++        }
++    }
++
+     if (!sc->current)
+         return;
+     if (!obs_source_showing(sc->source))
