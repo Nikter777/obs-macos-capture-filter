@@ -2,7 +2,7 @@
 
 This document describes how to apply the experimental capture filter patch to OBS Studio 32.0.4 and build the modified macOS capture plugin.
 
-> **Experimental:** These instructions are based on the developer's existing OBS build environment. A complete clean-build reproduction has not yet been verified.
+> **Experimental:** These instructions are based on the developer's existing OBS build environment. The patch has been independently applied to a fresh OBS Studio 32.0.4 checkout, and the modified mac-capture plugin has been successfully compiled. Runtime testing of the independently built plugin remains pending.
 
 ## Requirements
 
@@ -57,18 +57,34 @@ plugins/mac-capture/mac-sck-video-capture.m
 
 ## 3. Configure the Build
 
-The developer's existing build used the following CMake settings:
+The modified plugin was successfully built from a fresh OBS Studio 32.0.4 checkout using CMake and Xcode.
 
-```text
-CMAKE_GENERATOR=Xcode
-CMAKE_OSX_DEPLOYMENT_TARGET=12.0
+The following example assumes the OBS build dependencies are available locally:
+
+```bash
+cmake -S . -B build_macos -G Xcode \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+  -DCMAKE_PREFIX_PATH="/path/to/obs-deps;/path/to/obs-deps-qt6" \
+  -DVIRTUALCAM_DEVICE_UUID="$(uuidgen)" \
+  -DVIRTUALCAM_SOURCE_UUID="$(uuidgen)" \
+  -DVIRTUALCAM_SINK_UUID="$(uuidgen)"
 ```
 
-These settings describe the original build environment and do not establish the minimum macOS version supported by the modification.
+Replace the dependency paths with the locations of your OBS build dependencies.
 
-For a new environment, configure OBS Studio according to its upstream macOS build instructions.
+### Swift Configuration
 
-The original project's build directory was named `build_macos`.
+During independent build verification, CMake initially failed with:
+
+```text
+CMake can not determine linker language for target: libobs-metal
+```
+
+The macOS camera extension returned before calling `enable_language(Swift)` because its UUID values were missing. Providing three valid UUIDs resolved this error in the tested environment.
+
+These build settings do not establish the minimum supported macOS version.
+
+Consult the upstream OBS Studio documentation for dependency installation and other platform requirements.
 
 ## 4. Build the macOS Capture Plugin
 

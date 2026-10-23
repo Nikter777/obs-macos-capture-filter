@@ -88,7 +88,7 @@ The project provides a source patch targeting **OBS Studio 32.0.4**.
 
 The patch has been checked against the original OBS source files using Git.
 
-A complete clean-build reproduction has not yet been verified.
+The patch has been successfully applied to a fresh OBS Studio 32.0.4 checkout, and the modified mac-capture plugin has been independently compiled. Runtime testing of this independently built plugin remains pending.
 
 ### Documentation
 
