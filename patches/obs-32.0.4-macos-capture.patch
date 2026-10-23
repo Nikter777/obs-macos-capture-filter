@@ -46,10 +46,10 @@ index 67e4881..e9d377c 100644
      float scale_factor = 1.0f;
      CGRect window_rect = {};
 diff --git a/plugins/mac-capture/mac-sck-video-capture.m b/plugins/mac-capture/mac-sck-video-capture.m
-index 258dd34..5d21fdf 100644
+index 258dd34..cc46324 100644
 --- a/plugins/mac-capture/mac-sck-video-capture.m
 +++ b/plugins/mac-capture/mac-sck-video-capture.m
-@@ -1,8 +1,370 @@
+@@ -1,8 +1,346 @@
  #include "mac-sck-common.h"
  #include "window-utils.h"
  
@@ -65,30 +65,6 @@ index 258dd34..5d21fdf 100644
 +    bool found = false;
 +
 +    for (NSDictionary *window in (NSArray *) window_info) {
-+        /*
-+         * 1. Основное окно Screenshot.app
-+         */
-+        NSNumber *pid_number =
-+            [window objectForKey:(id) kCGWindowOwnerPID];
-+
-+        if (pid_number) {
-+            pid_t pid = (pid_t) [pid_number intValue];
-+
-+            NSRunningApplication *app =
-+                [NSRunningApplication
-+                    runningApplicationWithProcessIdentifier:pid];
-+
-+            if ([[app bundleIdentifier]
-+                    isEqualToString:@"com.apple.screencaptureui"]) {
-+                found = true;
-+                break;
-+            }
-+        }
-+
-+        /*
-+         * 2. Служебные окна выделения Cmd+Shift+4.
-+         * Они появляются очень рано — ещё до основного Screenshot UI.
-+         */
 +        NSString *name =
 +            [window objectForKey:(id) kCGWindowName];
 +
@@ -420,7 +396,7 @@ index 258dd34..5d21fdf 100644
      if (sc->disp && !sc->capture_failed) {
          [sc->disp stopCaptureWithCompletionHandler:^(NSError *_Nullable error) {
              if (error && error.code != SCStreamErrorAttemptToStopStreamState) {
-@@ -110,26 +472,36 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture
+@@ -110,26 +448,36 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture
                  os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
                  return true;
              }
@@ -467,7 +443,7 @@ index 258dd34..5d21fdf 100644
              }
  
              set_display_mode(sc, target_display);
-@@ -310,6 +682,8 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
+@@ -310,6 +658,8 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
      if (!init_screen_stream(sc))
          goto fail;
  
@@ -476,7 +452,7 @@ index 258dd34..5d21fdf 100644
      return sc;
  
  fail:
-@@ -321,6 +695,135 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_tick(void *data, float
+@@ -321,6 +671,135 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_tick(void *data, float
  {
      struct screen_capture *sc = data;
  
