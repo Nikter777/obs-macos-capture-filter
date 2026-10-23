@@ -33,7 +33,7 @@ The project includes experimental handling of the macOS screenshot shortcut:
 
 `Command + Shift + 4`
 
-When the screenshot selection interface is activated, the captured image temporarily freezes.
+When the screenshot selection interface is activated, the capture behavior temporarily changes. Desktop icons may disappear from the captured image and return after the screenshot interface closes.
 
 This behavior prevents the screenshot selection process from appearing normally in the recording.
 
@@ -109,7 +109,7 @@ The following results were observed in the developer's environment:
 |---|---|
 | ChatGPT Classic exclusion | Working |
 | AdGuard VPN exclusion | Working |
-| Screenshot selection (`Command + Shift + 4`) | Temporary capture freezing |
+| Screenshot selection (`Command + Shift + 4`) | Temporary capture filtering; normal capture resumes afterward |
 | macOS Dock exclusion | Not working |
 
 These results describe the tested environment and do not guarantee identical behavior on other systems.
@@ -120,7 +120,7 @@ This project is experimental and is not intended to provide complete privacy pro
 
 - **Dock visibility:** The macOS Dock remains visible in recordings, even when exclusion is attempted.
 - **Hardcoded application list:** Changing the excluded applications currently requires modifying the source code.
-- **Screenshot freezing:** Capture temporarily freezes during screenshot selection.
+- **Screenshot selection:** Desktop icons may temporarily disappear from the captured image. Normal capture resumes after the screenshot interface closes.
 - **Version compatibility:** The patch targets OBS Studio 32.0.4. Other versions have not been verified.
 - **System UI:** Some system elements, notifications, application indicators, or sensitive information may still appear in recordings.
 - **Installation:** A general-purpose installer is not provided.
