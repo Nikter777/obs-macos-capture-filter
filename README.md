@@ -144,7 +144,11 @@ The recordings are approximately synchronized. This demonstration illustrates ap
 
 The project was created as an independent technical experiment exploring native macOS screen capture APIs and modifications to OBS Studio.
 
-Future improvements may include configurable application exclusions, additional compatibility testing, and simplified installation.
+Further development will depend on personal needs, community interest, and user feedback. Improvements and new features may be considered as practical needs arise or in response to suggestions and requests from users.
+
+Potential improvements include configurable application exclusions, additional compatibility testing, and simplified installation.
+
+Suggestions, bug reports, and feature requests are welcome through [GitHub Issues](https://github.com/Nikter777/obs-macos-capture-filter/issues).
 
 ## License
 
