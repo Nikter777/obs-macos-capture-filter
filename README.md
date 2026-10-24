@@ -88,7 +88,7 @@ The project provides a source patch targeting **OBS Studio 32.0.4**.
 
 The patch has been checked against the original OBS source files using Git.
 
-The patch has been successfully applied to a fresh OBS Studio 32.0.4 checkout, and the modified mac-capture plugin has been independently compiled. Runtime testing of this independently built plugin remains pending.
+The patch has been successfully applied to a fresh OBS Studio 32.0.4 checkout. Both the modified mac-capture plugin and the OBS Studio application have been independently compiled using CMake and Xcode. Runtime testing was also completed using a separately signed test application with a distinct bundle identifier. Exclusion of ChatGPT Classic and AdGuard VPN windows was confirmed.
 
 ### Documentation
 
@@ -110,7 +110,7 @@ The following results were observed in the developer's environment:
 | ChatGPT Classic exclusion | Working |
 | AdGuard VPN exclusion | Working |
 | Screenshot selection (`Command + Shift + 4`) | Temporary capture filtering; normal capture resumes afterward |
-| macOS Dock exclusion | Not working |
+| macOS Dock visibility | Inconsistent across tests; not reliably excluded |
 
 These results describe the tested environment and do not guarantee identical behavior on other systems.
 
@@ -118,7 +118,7 @@ These results describe the tested environment and do not guarantee identical beh
 
 This project is experimental and is not intended to provide complete privacy protection.
 
-- **Dock visibility:** The macOS Dock remains visible in recordings, even when exclusion is attempted.
+- **Dock visibility:** Dock behavior has varied between tests. Its exclusion is not guaranteed.
 - **Hardcoded application list:** Changing the excluded applications currently requires modifying the source code.
 - **Screenshot selection:** Desktop icons may temporarily disappear from the captured image. Normal capture resumes after the screenshot interface closes.
 - **Version compatibility:** The patch targets OBS Studio 32.0.4. Other versions have not been verified.
@@ -129,13 +129,14 @@ Always review recorded output before relying on application exclusion.
 
 ## Demonstration
 
-A demonstration video is planned.
+A 16-second side-by-side demonstration is available in the [v0.1.0 release](https://github.com/Nikter777/obs-macos-capture-filter/releases/tag/v0.1.0).
 
-It will show:
+**[Watch or download the demonstration (MP4)](https://github.com/Nikter777/obs-macos-capture-filter/releases/download/v0.1.0/demo.mp4)**
 
-1. Application exclusion during screen recording.
-2. Screenshot-aware capture behavior.
-3. Known limitations, including Dock visibility.
+- **Left — Original Screen:** Standard macOS screen recording showing the actual desktop, including ChatGPT Classic and AdGuard VPN windows.
+- **Right — OBS Filtered Capture:** Recording produced by the modified OBS Studio application, with the selected application windows excluded.
+
+The recordings are approximately synchronized. This demonstration illustrates application-window exclusion, not comprehensive privacy protection.
 
 ## Project Status
 
