@@ -2,7 +2,7 @@
 
 This document describes how to apply the experimental capture filter patch to OBS Studio 32.0.4 and build the modified macOS capture plugin.
 
-> **Experimental:** These instructions are based on the developer's existing OBS build environment. The patch has been independently applied to a fresh OBS Studio 32.0.4 checkout, and the modified mac-capture plugin has been successfully compiled. Runtime testing of the independently built plugin remains pending.
+> **Experimental:** These instructions are based on the developer's existing OBS build environment. The patch was successfully applied to a fresh OBS Studio 32.0.4 checkout. Both the modified mac-capture plugin and the OBS Studio application were independently compiled. Runtime testing with a separately signed test application confirmed exclusion of ChatGPT Classic and AdGuard VPN windows.
 
 ## Requirements
 
@@ -111,7 +111,7 @@ The following behavior was observed in the developer's environment:
 | ChatGPT Classic application exclusion | Working |
 | AdGuard VPN application exclusion | Working |
 | Screenshot shortcut (`Command + Shift + 4`) | Temporary capture freezing |
-| macOS Dock exclusion | Not working |
+| macOS Dock visibility | Inconsistent across tests; reliable exclusion not confirmed |
 
 The application exclusion list is currently hardcoded in the source code.
 
@@ -119,7 +119,7 @@ The application exclusion list is currently hardcoded in the source code.
 
 - This is an experimental modification of OBS Studio.
 - The patch targets OBS Studio 32.0.4.
-- A clean build from these instructions has not yet been verified.
+- A fresh OBS Studio 32.0.4 checkout was successfully patched and built in the developer's prepared environment. Reproduction on a new machine without preinstalled build dependencies has not been verified.
 - The presence of a compiled plugin does not guarantee compatibility with other OBS installations.
 - Do not overwrite an existing OBS installation without a verified backup and a recovery plan.
 - Replacing or re-signing OBS application components may affect code signing, updates, permissions, or other functionality.
